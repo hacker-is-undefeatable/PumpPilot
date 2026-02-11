@@ -2,16 +2,13 @@
 # requires-python = ">=3.14"
 # dependencies = [
 #     "dotenv>=0.9.9",
+#     "python-telegram-bot>=22.6",
 #     "requests>=2.32.5",
-#     "telegram>=0.0.1",
-#     "websockets>=16.0",
 # ]
 # ///
 import asyncio
-import websockets
 import json
 import requests
-import time
 import os
 from dotenv import load_dotenv
 
@@ -28,17 +25,33 @@ from telegram.ext import (
 # Load environment variables
 load_dotenv()
 
-# Constants
-ROBINPUMP_WS = "ws://localhost:3000/api/data"
-ROBINPUMP_API = "http://localhost:3000/api/trade"
+# Backend config
+BACKEND_API = os.getenv("BACKEND_API", "http://localhost:8080")
+BACKEND_AUTH_TOKEN = os.getenv("BACKEND_AUTH_TOKEN", "")
+OUTPUT_JSONL_PATH = os.getenv("OUTPUT_JSONL_PATH", "../backend/data/output.jsonl")
+RPC_URL = os.getenv("RPC_URL", "https://weathered-tiniest-sunset.base-mainnet.quiknode.pro/eef4e16be8050f49227e10af6d447be5175e638b/")
+
+# Factory address and event topic for the pool creation event
+FACTORY_ADDRESS = os.getenv("FACTORY_ADDRESS", "0x07dfaec8e182c5ef79844adc70708c1c15aa60fb").lower()
+TOKEN_CREATED_TOPIC = "0x01b6aab41d4eb83cfcd6c8c59cc6c3dd697ac0110c58c23bf222e7884e44245c"
+
+# Max uint256 for approve
+MAX_UINT256 = str(2**256 - 1)
 
 # Conversation states
 SLIPPAGE, TRACKED_ADDRESS, WAIT_TIME, POSITION_SIZE, CONFIRM = range(5)
 
 
+def _headers():
+    h = {"Content-Type": "application/json"}
+    if BACKEND_AUTH_TOKEN:
+        h["X-API-Key"] = BACKEND_AUTH_TOKEN
+    return h
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
-        "Welcome to the RobinPump Fun Sniping Bot on Base! Let's create a new sniping setup.\n"
+        "Welcome to PumpPilot Sniping Bot on Base! Let's create a new sniping setup.\n"
         "Enter slippage percentage (e.g., 10 for 10%):"
     )
     return SLIPPAGE
@@ -66,8 +79,8 @@ async def tracked_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def wait_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
-        wait_time = int(update.message.text)
-        context.user_data["wait_time"] = wait_time if wait_time > 0 else None
+        wt = int(update.message.text)
+        context.user_data["wait_time"] = wt if wt > 0 else None
         await update.message.reply_text("Enter position size in ETH:")
         return POSITION_SIZE
     except ValueError:
@@ -89,13 +102,14 @@ async def position_size(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.text.lower() == "yes":
-        await update.message.reply_text("Creating new Lightning wallet...")
+        await update.message.reply_text("Creating wallet via backend...")
         try:
-            private_key, public_key = create_lightning_wallet()
-            context.user_data["private_key"] = private_key
-            context.user_data["public_key"] = public_key
+            address = create_wallet()
+            context.user_data["address"] = address
             await update.message.reply_text(
-                f"Please fund the address {public_key} with at least {context.user_data['position_size'] + 0.01} ETH (including fees). Reply 'funded' when done."
+                f"Please fund the address {address} with at least "
+                f"{context.user_data['position_size'] + 0.0003} ETH (including gas). "
+                f"Reply 'funded' when done."
             )
             return ConversationHandler.END
         except Exception as e:
@@ -109,116 +123,240 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def funded(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Starting sniping...")
     asyncio.create_task(
-        subscribe_to_new_tokens(
-            update.message.chat_id,
-            context.user_data["tracked_address"],
-            context.user_data["private_key"],
-            context.user_data["slippage"],
-            context.user_data["wait_time"],
-            context.user_data["position_size"],
-            context.bot,
-            context.user_data["public_key"],
+        watch_jsonl_for_tokens(
+            chat_id=update.message.chat_id,
+            tracked_address=context.user_data["tracked_address"],
+            wallet_address=context.user_data["address"],
+            slippage=context.user_data["slippage"],
+            wait_time=context.user_data["wait_time"],
+            position_size=context.user_data["position_size"],
+            bot=context.bot,
         )
     )
 
 
-def create_lightning_wallet():
-    response = requests.post("http://localhost:3000/api/lightning/create")
-    if response.status_code == 200:
-        data = response.json()
-        private_key = data["private_key"]  # Assume hex or string, handle accordingly
-        public_key = data["public_key"]
-        return private_key, public_key
-    else:
-        raise Exception("Failed to create wallet: " + response.text)
+# --------------- Backend API helpers ---------------
 
 
-def execute_trade(
-    action, mint, amount, private_key, slippage, priority_fee=500000
-):  # Adjusted for gas
+def create_wallet() -> str:
+    resp = requests.post(f"{BACKEND_API}/keys", headers=_headers())
+    resp.raise_for_status()
+    return resp.json()["address"]
+
+
+def execute_buy(wallet_address: str, pair: str, token: str, eth_in: str) -> dict:
     payload = {
-        "action": action,
-        "mint": mint,
-        "amount": amount,
-        "denominatedInEth": True if action == "buy" else False,
-        "priorityFee": priority_fee,
-        "slippage": slippage,
-        "privateKey": private_key,
+        "from": wallet_address,
+        "pair": pair,
+        "token": token,
+        "eth_in": eth_in,
+        "min_tokens_out": "0",
     }
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(ROBINPUMP_API, headers=headers, json=payload)
-    if response.status_code == 200:
-        print(f"{action.capitalize()} executed successfully for mint {mint}.")
-        return response.json()
-    else:
-        print(f"Failed to {action}: {response.text}")
-        return None
-
-
-def get_token_balance(public_key, mint):
-    payload = {"public_key": public_key, "mint": mint}
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(
-        "http://localhost:3000/api/balance", headers=headers, json=payload
+    resp = requests.post(
+        f"{BACKEND_API}/trade/buy", headers=_headers(), json=payload
     )
-    if response.status_code == 200:
-        data = response.json()
-        return data.get("balance", 0)
-    else:
-        print(f"Failed to get balance: {response.text}")
-        return 0
+    resp.raise_for_status()
+    return resp.json()
 
 
-async def subscribe_to_new_tokens(
-    chat_id,
-    tracked_address,
-    private_key,
-    slippage,
-    wait_time,
-    position_size,
+def execute_approve(wallet_address: str, pair: str, token: str) -> dict:
+    payload = {
+        "from": wallet_address,
+        "token": token,
+        "pair": pair,
+        "amount_wei": MAX_UINT256,
+    }
+    resp = requests.post(
+        f"{BACKEND_API}/trade/approve", headers=_headers(), json=payload
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def execute_sell(
+    wallet_address: str, pair: str, token: str, token_amount_in_wei: str
+) -> dict:
+    payload = {
+        "from": wallet_address,
+        "pair": pair,
+        "token": token,
+        "token_amount_in_wei": token_amount_in_wei,
+        "min_refund_eth": "0",
+    }
+    resp = requests.post(
+        f"{BACKEND_API}/trade/sell", headers=_headers(), json=payload
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_token_balance(wallet_address: str, token: str) -> str:
+    resp = requests.get(
+        f"{BACKEND_API}/balances",
+        headers=_headers(),
+        params={"address": wallet_address, "token": token},
+    )
+    resp.raise_for_status()
+    return resp.json().get("balance_wei", "0")
+
+
+# --------------- Pool/token extraction ---------------
+
+
+def _topic_to_address(topic: str) -> str:
+    """Convert a 32-byte hex topic to a checksumless 0x address."""
+    return "0x" + topic[-40:]
+
+
+def _extract_pool_token(event: dict) -> tuple[str, str]:
+    """Extract pool and token addresses from a JSONL event.
+
+    First checks enriched fields (pool_address, token_addresses).
+    Falls back to fetching the tx receipt from RPC and parsing raw logs.
+    """
+    # Try enriched fields first
+    pool = event.get("pool_address", "")
+    tokens = event.get("token_addresses", [])
+    if pool and tokens:
+        return pool, tokens[0]
+
+    # Fetch receipt from RPC and parse raw logs
+    tx_hash = event.get("tx_hash")
+    if not tx_hash:
+        return "", ""
+
+    try:
+        resp = requests.post(
+            RPC_URL,
+            json={
+                "jsonrpc": "2.0",
+                "method": "eth_getTransactionReceipt",
+                "params": [tx_hash],
+                "id": 1,
+            },
+            timeout=10,
+        )
+        receipt = resp.json().get("result", {})
+        for log in receipt.get("logs", []):
+            topics = log.get("topics", [])
+            addr = log.get("address", "").lower()
+            if (
+                addr == FACTORY_ADDRESS
+                and len(topics) >= 3
+                and topics[0] == TOKEN_CREATED_TOPIC
+            ):
+                pool = _topic_to_address(topics[1])
+                token = _topic_to_address(topics[2])
+                return pool, token
+    except Exception as e:
+        print(f"RPC receipt fetch failed: {e}")
+
+    return "", ""
+
+
+# --------------- JSONL file watcher ---------------
+
+
+async def watch_jsonl_for_tokens(
+    chat_id: int,
+    tracked_address: str,
+    wallet_address: str,
+    slippage: float,
+    wait_time: int | None,
+    position_size: float,
     bot,
-    public_key,
 ):
-    async with websockets.connect(ROBINPUMP_WS) as websocket:
-        payload = {"method": "subscribeNewToken"}
-        await websocket.send(json.dumps(payload))
-        print("Subscribed to new token events...")
+    path = os.path.abspath(OUTPUT_JSONL_PATH)
+    print(f"Watching {path} for tokens from {tracked_address}...")
 
-        while True:
-            message = await websocket.recv()
-            data = json.loads(message)
-            if "tx" in data and "from" in data["tx"]:
-                creator = data["tx"]["from"]
-                mint = data.get("mint")  # Assuming mint is in data
-                if creator.lower() == tracked_address.lower():
+    # Start from end of file if it exists
+    try:
+        with open(path, "r") as f:
+            f.seek(0, 2)  # seek to end
+            pos = f.tell()
+    except FileNotFoundError:
+        pos = 0
+
+    while True:
+        try:
+            with open(path, "r") as f:
+                f.seek(pos)
+                new_data = f.read()
+                pos = f.tell()
+        except FileNotFoundError:
+            await asyncio.sleep(1)
+            continue
+
+        if new_data:
+            for line in new_data.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                creator = event.get("from", "")
+                if creator.lower() != tracked_address.lower():
+                    continue
+
+                # Parse pool/token from raw receipt logs
+                pool_address, token = _extract_pool_token(event)
+                if not pool_address or not token:
                     await bot.send_message(
-                        chat_id, f"New token launched by tracked address: Mint {mint}"
+                        chat_id,
+                        f"Matched tracked address but could not extract pool/token from tx {event.get('tx_hash', '?')[:16]}...",
                     )
-                    # Buy
-                    result = execute_trade(
-                        "buy", mint, position_size, private_key, slippage
+                    continue
+
+                tx_hash = event.get("tx_hash", "unknown")
+
+                await bot.send_message(
+                    chat_id,
+                    f"New token launched by tracked address!\n"
+                    f"Pool: {pool_address}\n"
+                    f"Token: {token}\n"
+                    f"Tx: {tx_hash}",
+                )
+
+                # Buy
+                try:
+                    result = execute_buy(
+                        wallet_address, pool_address, token, str(position_size)
                     )
-                    if result:
-                        await bot.send_message(chat_id, "Buy executed successfully.")
+                    await bot.send_message(
+                        chat_id,
+                        f"Buy executed: {result.get('tx_hash', 'pending')}",
+                    )
+                except Exception as e:
+                    await bot.send_message(chat_id, f"Buy failed: {e}")
+                    continue
 
-                    if wait_time:
-                        await bot.send_message(
-                            chat_id, f"Waiting {wait_time} seconds before selling..."
-                        )
-                        await asyncio.sleep(wait_time)
+                # Wait then sell
+                if wait_time:
+                    await bot.send_message(
+                        chat_id, f"Waiting {wait_time}s before selling..."
+                    )
+                    await asyncio.sleep(wait_time)
 
-                        # Get token balance to sell all
-                        balance = get_token_balance(public_key, mint)
-                        if balance > 0:
-                            result = execute_trade(
-                                "sell", mint, balance, private_key, slippage
+                    balance = get_token_balance(wallet_address, token)
+                    if balance and balance != "0":
+                        try:
+                            execute_approve(wallet_address, pool_address, token)
+                            result = execute_sell(
+                                wallet_address, pool_address, token, balance
                             )
-                            if result:
-                                await bot.send_message(
-                                    chat_id, "Sell executed successfully."
-                                )
-                        else:
-                            await bot.send_message(chat_id, "No tokens to sell.")
+                            await bot.send_message(
+                                chat_id,
+                                f"Sell executed: {result.get('tx_hash', 'pending')}",
+                            )
+                        except Exception as e:
+                            await bot.send_message(chat_id, f"Sell failed: {e}")
+                    else:
+                        await bot.send_message(chat_id, "No tokens to sell.")
+
+        await asyncio.sleep(1)
 
 
 def main():
@@ -226,7 +364,7 @@ def main():
     if not TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN not found in .env file")
 
-    application = Application.builder() .token(TOKEN).build()
+    application = Application.builder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],

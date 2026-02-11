@@ -153,14 +153,14 @@ func subscribeHeads(ctx context.Context, logger *slog.Logger, wsURL string, out 
 		for {
 			select {
 			case <-ctx.Done():
-				_ = sub.Unsubscribe()
+				sub.Unsubscribe()
 				client.Close()
 				return
 			case err := <-sub.Err():
 				if err != nil && !errors.Is(err, context.Canceled) {
 					logger.Warn("ws subscription error", "error", err)
 				}
-				_ = sub.Unsubscribe()
+				sub.Unsubscribe()
 				client.Close()
 				wait(ctx, backoff)
 				backoff = minDuration(backoff*2, 10*time.Second)

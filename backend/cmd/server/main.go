@@ -33,7 +33,8 @@ func main() {
 
 	passphrase := os.Getenv(cfg.KeyStore.PassphraseEnv)
 	if passphrase == "" {
-		logger.Warn("keystore passphrase env is empty", "env", cfg.KeyStore.PassphraseEnv)
+		passphrase = "pumppilot-default"
+		logger.Warn("keystore passphrase env is empty, using default", "env", cfg.KeyStore.PassphraseEnv)
 	}
 	keysManager, err := keys.NewManager(cfg.KeyStore.Dir, passphrase)
 	if err != nil {
