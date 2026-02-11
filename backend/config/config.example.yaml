@@ -1,0 +1,53 @@
+chain: base
+chain_id: 8453
+factory_address: "0x07DFAEC8e182C5eF79844ADc70708C1c15aA60fb"
+
+rpc:
+  http: "https://YOUR_HTTP_ENDPOINT"
+  ws: "wss://YOUR_WS_ENDPOINT"
+
+ingestion:
+  start_block: "latest"
+  confirmations: 2
+  reorg_replay_depth: 5
+  poll_interval: 5s
+
+performance:
+  block_fetch_concurrency: 1
+  receipt_fetch_concurrency: 8
+  request_timeout: 15s
+  retry_max: 3
+  retry_backoff: 500ms
+  queue_size: 2000
+
+decoding:
+  abi_path: "config/factory_abi.json"
+  allow_missing_abi: false
+  decode_input: true
+  decode_logs: true
+  event_mappings:
+    - event: "PoolCreated"
+      pool_field: "pool"
+      token_fields: ["token", "token0", "token1"]
+
+tx:
+  default_deadline_seconds: 120
+  gas_limit_multiplier: 1.2
+  max_fee_multiplier: 2.0
+  min_priority_fee_gwei: 0.0
+  fee_refresh_seconds: 5
+
+keystore:
+  dir: "data/keystore"
+  passphrase_env: "PUMPPILOT_KEYSTORE_PASSPHRASE"
+  allow_private_export: false
+
+api:
+  listen: ":8080"
+  auth_token: ""
+
+checkpoint:
+  path: "data/checkpoint.json"
+
+output:
+  jsonl_path: "data/output.jsonl"

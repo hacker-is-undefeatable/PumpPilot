@@ -30,3 +30,7 @@ env/
 
 # Dependencies
 node_modules/
+# Backend data / secrets
+/backend/data/*.jsonl
+/backend/data/*.json
+/backend/data/keystore/
