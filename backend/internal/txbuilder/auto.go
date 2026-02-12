@@ -70,6 +70,28 @@ func (a *AutoBuilder) BuildSellTx(ctx context.Context, from common.Address, pair
 	return a.buildTx(ctx, from, pair, big.NewInt(0), data)
 }
 
+func (a *AutoBuilder) BuildTransferTx(ctx context.Context, from common.Address, to common.Address, value *big.Int) (*types.Transaction, error) {
+	if a.builder == nil || a.client == nil {
+		return nil, errors.New("builder and client are required")
+	}
+	if value == nil || value.Sign() <= 0 {
+		return nil, errors.New("value must be positive")
+	}
+	fees, err := a.fees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nonce, err := a.nextNonce(ctx, from)
+	if err != nil {
+		return nil, err
+	}
+	return buildDynamicTx(a.builder.ChainID, to, value, nil, BuildParams{
+		Nonce:    nonce,
+		GasLimit: 21000,
+		Fee:      fees,
+	})
+}
+
 func (a *AutoBuilder) BuildApproveTx(ctx context.Context, from common.Address, token common.Address, spender common.Address, amount *big.Int) (*types.Transaction, error) {
 	if a.builder == nil || a.client == nil {
 		return nil, errors.New("builder and client are required")

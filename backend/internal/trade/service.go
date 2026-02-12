@@ -116,6 +116,26 @@ func (s *Service) Approve(ctx context.Context, req ApproveRequest) (*TxResult, e
 	return s.signAndSend(ctx, from, tx, req.Simulate)
 }
 
+func (s *Service) Transfer(ctx context.Context, req TransferRequest) (*TxResult, error) {
+	from, err := parseAddress(req.From)
+	if err != nil {
+		return nil, err
+	}
+	to, err := parseAddress(req.To)
+	if err != nil {
+		return nil, err
+	}
+	ethValue, err := parseEthAmount(req.EthOut, req.EthWei)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.auto.BuildTransferTx(ctx, from, to, ethValue)
+	if err != nil {
+		return nil, err
+	}
+	return s.signAndSend(ctx, from, tx, false)
+}
+
 func (s *Service) signAndSend(ctx context.Context, from common.Address, tx *types.Transaction, simulate bool) (*TxResult, error) {
 	if tx == nil {
 		return nil, errors.New("transaction is nil")

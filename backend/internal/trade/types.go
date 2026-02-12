@@ -35,6 +35,13 @@ type ApproveRequest struct {
 	Simulate      bool   `json:"simulate,omitempty"`
 }
 
+type TransferRequest struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	EthOut string `json:"eth_out,omitempty"`
+	EthWei string `json:"eth_wei,omitempty"`
+}
+
 type TxResult struct {
 	Tx              interface{} `json:"tx,omitempty"`
 	TxHash          string      `json:"tx_hash,omitempty"`

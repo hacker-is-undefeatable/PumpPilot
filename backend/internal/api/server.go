@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/trade/buy", s.withAuth(s.handleBuy))
 	mux.HandleFunc("/trade/sell", s.withAuth(s.handleSell))
 	mux.HandleFunc("/trade/approve", s.withAuth(s.handleApprove))
+	mux.HandleFunc("/trade/transfer", s.withAuth(s.handleTransfer))
 	return mux
 }
 
@@ -244,6 +245,24 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := s.trade.Approve(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleTransfer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req trade.TransferRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	res, err := s.trade.Transfer(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
