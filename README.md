@@ -1,5 +1,8 @@
 # PumpPilot
 
+The video can be found here: https://drive.google.com/file/d/11uWZMI66YzibA3v7prXeSwz_xbqPelRH/view?usp=sharing.
+The bot can be found here: https://t.me/Robin_Sniper_Bot
+
 PumpPilot is a specialized blockchain monitoring and trading tool designed for the Base network. It features a high-performance Go backend for real-time event ingestion and transaction management, coupled with a Python Telegram bot for user interaction and sniping operations.
 
 ## Architecture
