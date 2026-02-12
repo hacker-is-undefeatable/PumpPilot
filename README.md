@@ -1,102 +1,111 @@
-# 🚀 PumpPilot
+# PumpPilot
 
-PumpPilot is a modern Web3 dashboard application built for managing and monitoring DeFi strategies. It leverages the power of Next.js for the frontend, Supabase for backend services, and Wagmi/RainbowKit for seamless blockchain interactions.
+PumpPilot is a specialized blockchain monitoring and trading tool designed for the Base network. It features a high-performance Go backend for real-time event ingestion and transaction management, coupled with a Python Telegram bot for user interaction and sniping operations.
 
-## 🛠 Tech Stack
+## Architecture
 
-- **Framework:** [Next.js 16 (App Router)](https://nextjs.org/)
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS 4, Framer Motion
-- **Web3 Integration:** 
-  - [Wagmi](https://wagmi.sh/) (React Hooks for Ethereum)
-  - [RainbowKit](https://www.rainbowkit.com/) (Wallet connection)
-  - [Viem](https://viem.sh/) (Ethereum Interface)
-- **Backend & Auth:** [Supabase](https://supabase.com/)
-- **State Management:** React Query (TanStack Query)
-- **Icons:** Lucide React
+The project consists of two main components:
 
-## 📂 Project Structure
+1.  **Backend (Go)**:
+    *   **Event Ingestion**: Monitors block headers and logs in real-time.
+    *   **Decoding**: Decodes specific contract events (e.g., `PoolCreated` from a Factory contract).
+    *   **TxBuilder**: Manages transaction construction, fees, and nonce management.
+    *   **API**: Exposes endpoints for the frontend/bot to interact with.
 
-```
-PumpPilot/
-├── frontend/             # Main Next.js application
-│   ├── src/
-│   │   ├── app/          # App Router pages (Dashboard, Auth, etc.)
-│   │   ├── components/   # Reusable UI components
-│   │   ├── lib/          # Utilities, Supabase & Wagmi config
-│   └── ...
-```
+2.  **Telegram Bot (Python)**:
+    *   **Sniper Interface**: Allows users to input tracked addresses and manage trades.
+    *   **Alerts**: Receives updates from the backend and notifies the user.
+    *   **Interaction**: Handles user commands for approving tokens and executing trades.
 
-## 🏎️ Getting Started
+## Prerequisites
 
-### Prerequisites
+*   [Go](https://go.dev/) (1.21+)
+*   [Python](https://www.python.org/) (3.14+)
+*   Access to an Ethereum-compatible RPC (HTTP and WebSocket) for the Base network.
 
-- Node.js (v18+ recommended)
-- A [Supabase](https://supabase.com/) project
-- A [WalletConnect](https://cloud.walletconnect.com/) Project ID
+## Setup & Configuration
 
-### Installation
+### 1. Backend
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/pumppilot.git
-   cd pumppilot
-   ```
-
-2. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-3. Install dependencies:
-   ```bash
-   npm install
-   # or
-   yarn install
-   # or
-   pnpm install
-   ```
-
-### 🔐 Configuration
-
-Create a `.env.local` file in the `frontend` directory and add your environment variables:
-
-```env
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# WalletConnect (for RainbowKit)
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-```
-
-*Note: You may need to update `src/lib/wagmi.ts` to use `process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` if it is currently hardcoded.*
-
-### 🚀 Running the App
-
-Start the development server:
+Navigate to the `backend` directory:
 
 ```bash
-npm run dev
+cd backend
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to view the application.
+Create a configuration file based on the example:
 
-## ✨ Features
+```bash
+cp config/config.example.yaml config.yaml
+```
 
-- **Authentication**: Secure user login via Supabase.
-- **Web3 Wallet Connection**: Connect seamlessly with MetaMask, Rainbow, Coinbase Wallet, etc.
-- **Dashboard**: Centralized view for monitoring activities.
-- **Strategy Management**: Create and track various crypto strategies (`/dashboard/strategies`).
-- **Responsive Design**: Mobile-friendly interface built with Tailwind CSS.
+Edit `config.yaml` to include your RPC endpoints:
 
-## 🤝 Contributing
+```yaml
+rpc:
+  http: "https://YOUR_BASE_RPC_URL"
+  ws: "wss://YOUR_BASE_WS_URL"
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### 2. Telegram Bot
 
-## 📄 License
+Navigate to the `tg_bot` directory:
 
-This project is open source and available under the [MIT License](LICENSE).
+```bash
+cd tg_bot
+```
 
-## Backend
-See `backend/README.md` for backend setup and usage.
+Create a `.env` file with the necessary environment variables:
+
+```env
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+BACKEND_API=http://localhost:8080
+RPC_URL=https://your_rpc_url
+```
+
+## Usage
+
+### Running the Backend
+
+From the `backend` directory:
+
+```bash
+go run cmd/pumppilot/main.go --config config.yaml
+```
+
+The server will start listening on port `:8080` (or as configured).
+
+### Running the Telegram Bot
+
+From the `tg_bot` directory:
+
+```bash
+# Install dependencies (using uv or pip)
+pip install python-telegram-bot requests python-dotenv
+
+# Run the bot
+python sniper.py
+```
+
+## Features
+
+*   **Real-time Monitoring**: Ingests blocks and logs with configurable concurrency.
+*   **Reorg Handling**: Built-in protection for chain reorgs.
+*   **Transaction Management**: Automatic gas estimation and nonce management.
+*   **Keystore Security**: Local encrypted keystore for wallet management.
+
+## Project Structure
+
+```
+├── backend/            # Go backend application
+│   ├── cmd/            # Entry points (pumppilot, server)
+│   ├── internal/       # Core business logic (ingestion, trading, txbuilder)
+│   └── config/         # Configuration templates and ABIs
+├── tg_bot/             # Python Telegram bot
+│   └── sniper.py       # Main bot script
+└── web/                # Web frontend (if applicable)
+```
+
+## Disclaimer
+
+This software is for educational purposes only. Use at your own risk.
